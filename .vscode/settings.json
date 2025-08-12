@@ -1,0 +1,8 @@
+{
+  "typescript.preferences.importModuleSpecifier": "shortest",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "files.eol": "\n",
+  "tailwindCSS.includeLanguages": { "plaintext": "html" }
+}
