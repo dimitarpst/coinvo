@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* Tell Tailwind where to look (v4 replaces `content` with @source) */
+@source "../index.html";
+@source "./**/*.{js,jsx,ts,tsx}";
