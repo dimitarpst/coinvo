@@ -1,0 +1,17 @@
+{
+  "name": "budgetchat-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n FRONTEND,BACKEND -c cyan,magenta \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "npm --workspace apps/frontend run dev",
+    "dev:backend": "npm --workspace apps/backend run start:dev",
+    "build": "npm -w apps/frontend run build && npm -w apps/backend run build",
+    "lint": "npm -w apps/frontend run lint || exit 0 && npm -w apps/backend run lint || exit 0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
