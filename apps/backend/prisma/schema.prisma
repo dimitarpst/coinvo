@@ -12,7 +12,9 @@ model Expense {
   amount    Decimal
   currency  String
   category  String
-  date      DateTime
+  date      DateTime @map("date")      
   note      String?
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("expense")                        
 }
