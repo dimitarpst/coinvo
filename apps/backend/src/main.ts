@@ -9,11 +9,16 @@ async function bootstrap() {
     origin: 'http://localhost:5173',
   });
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,         
-    forbidNonWhitelisted: true, 
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
 
   await app.listen(3000);
 }
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('Fatal bootstrap error:', err);
+  process.exit(1);
+});
