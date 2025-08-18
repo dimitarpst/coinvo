@@ -1,25 +1,59 @@
+// src/hooks/useSpeech.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Status = 'idle' | 'listening' | 'finalizing' | 'error';
 
+// --- Minimal Web Speech API typings (enough for our usage) ---
+interface SpeechRecognitionResultAlternative {
+  transcript: string;
+  confidence?: number;
+}
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  0: SpeechRecognitionResultAlternative;
+  length: number;
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: SpeechRecognitionResult[];
+}
+interface SpeechRecognitionErrorLike {
+  error?: string;
+  message?: string;
+}
+interface ISpeechRecognition {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onstart?: () => void;
+  onresult?: (ev: SpeechRecognitionEventLike) => void;
+  onerror?: (ev: SpeechRecognitionErrorLike) => void;
+  onend?: () => void;
+}
+type ISpeechRecognitionCtor = new () => ISpeechRecognition;
+
 declare global {
   interface Window {
-    webkitSpeechRecognition?: any;
-    SpeechRecognition?: any;
+    webkitSpeechRecognition?: ISpeechRecognitionCtor;
+    SpeechRecognition?: ISpeechRecognitionCtor;
   }
 }
 
 export function useSpeech(lang?: string) {
-  const Recog = useMemo(
-    () => (typeof window !== 'undefined'
-      ? (window.SpeechRecognition || window.webkitSpeechRecognition)
-      : undefined),
-    []
+  const RecogCtor = useMemo<ISpeechRecognitionCtor | undefined>(
+    () =>
+      typeof window !== 'undefined'
+        ? window.SpeechRecognition || window.webkitSpeechRecognition
+        : undefined,
+    [],
   );
 
-  const supported = !!Recog;
+  const supported = !!RecogCtor;
 
-  const recRef = useRef<any | null>(null);
+  const recRef = useRef<ISpeechRecognition | null>(null);
   const sessionActiveRef = useRef(false);
   const keepAliveRef = useRef(false);
   const firstStartRef = useRef(true);
@@ -28,13 +62,19 @@ export function useSpeech(lang?: string) {
   const [error, setError] = useState<string | null>(null);
   const [finalText, setFinal] = useState('');
   const [interimText, setInterim] = useState('');
-  const transcript = (finalText + (interimText ? ' ' + interimText : '')).trim();
+  const transcript = (
+    finalText + (interimText ? ' ' + interimText : '')
+  ).trim();
 
   // Refs to avoid stale state in onend:
   const finalRef = useRef('');
   const interimRef = useRef('');
-  useEffect(() => { finalRef.current = finalText; }, [finalText]);
-  useEffect(() => { interimRef.current = interimText; }, [interimText]);
+  useEffect(() => {
+    finalRef.current = finalText;
+  }, [finalText]);
+  useEffect(() => {
+    interimRef.current = interimText;
+  }, [interimText]);
 
   const [elapsedSec, setElapsedSec] = useState(0);
   const tickRef = useRef<number | null>(null);
@@ -42,139 +82,160 @@ export function useSpeech(lang?: string) {
 
   const [endedAt, setEndedAt] = useState(0);
 
-  const startTimer = () => {
+  const startTimer = useCallback(() => {
     if (!startTsRef.current) startTsRef.current = Date.now();
     if (tickRef.current) return;
     tickRef.current = window.setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startTsRef.current) / 1000));
-    }, 250);
-  };
-  const stopTimer = () => {
+    }, 250) as unknown as number; // setInterval returns number in browsers
+  }, []);
+
+  const stopTimer = useCallback(() => {
     if (tickRef.current) {
       clearInterval(tickRef.current);
       tickRef.current = null;
     }
-  };
-  const resetTimer = () => {
+  }, []);
+
+  const resetTimer = useCallback(() => {
     startTsRef.current = 0;
     setElapsedSec(0);
     stopTimer();
-  };
+  }, [stopTimer]);
 
-  const resetTexts = () => {
+  const resetTexts = useCallback(() => {
     setFinal('');
     setInterim('');
     finalRef.current = '';
     interimRef.current = '';
-  };
+  }, []);
 
-  const createAndStart = useCallback((language?: string) => {
-    if (!supported) return;
-    const rec = new Recog();
-    recRef.current = rec;
+  const createAndStart = useCallback(
+    (language?: string) => {
+      if (!supported || !RecogCtor) return;
+      const rec = new RecogCtor();
+      recRef.current = rec;
 
-    rec.lang = language || lang || navigator.language || 'en-US';
-    rec.interimResults = true;
-    rec.continuous = true;
+      rec.lang = language || lang || navigator.language || 'en-US';
+      rec.interimResults = true;
+      rec.continuous = true;
 
-    rec.onstart = () => {
-      setStatus('listening');
-      setError(null);
-      if (firstStartRef.current) {
-        startTimer();
-        firstStartRef.current = false;
-      }
-    };
-
-    rec.onresult = (ev: any) => {
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const res = ev.results[i];
-        if (res.isFinal) {
-          const txt = (res[0]?.transcript || '').trim();
-          setFinal(prev => {
-            const combined = prev ? `${prev} ${txt}` : txt;
-            finalRef.current = combined;
-            return combined;
-          });
-          setInterim('');
-          interimRef.current = '';
-        } else {
-          const it = res[0]?.transcript || '';
-          setInterim(it);
-          interimRef.current = it;
+      rec.onstart = () => {
+        setStatus('listening');
+        setError(null);
+        if (firstStartRef.current) {
+          startTimer();
+          firstStartRef.current = false;
         }
-      }
-    };
+      };
 
-    rec.onerror = (e: any) => {
-      if (!keepAliveRef.current) {
-        setStatus('error');
-        setError(e?.error || 'speech_error');
+      rec.onresult = (ev: SpeechRecognitionEventLike) => {
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const res = ev.results[i];
+          if (res.isFinal) {
+            const txt = (res[0]?.transcript || '').trim();
+            setFinal((prev) => {
+              const combined = prev ? `${prev} ${txt}` : txt;
+              finalRef.current = combined;
+              return combined;
+            });
+            setInterim('');
+            interimRef.current = '';
+          } else {
+            const it = res[0]?.transcript || '';
+            setInterim(it);
+            interimRef.current = it;
+          }
+        }
+      };
+
+      rec.onerror = (e: SpeechRecognitionErrorLike) => {
+        if (!keepAliveRef.current) {
+          setStatus('error');
+          setError(e?.error || 'speech_error');
+          stopTimer();
+        }
+      };
+
+      rec.onend = () => {
+        // keep-alive loop
+        if (sessionActiveRef.current && keepAliveRef.current) {
+          try {
+            rec.start();
+          } catch {
+            // Safari sometimes throws on immediate restart; small backoff
+            setTimeout(() => createAndStart(rec.lang), 50);
+          }
+          return;
+        }
+
+        // TRUE end: merge any remaining interim into final before emitting endedAt
+        const merged = (
+          finalRef.current +
+          (interimRef.current ? ' ' + interimRef.current : '')
+        ).trim();
+        if (merged !== finalRef.current) {
+          setFinal(merged);
+          finalRef.current = merged;
+        }
+        setInterim('');
+        interimRef.current = '';
+
+        sessionActiveRef.current = false;
+        keepAliveRef.current = false;
+        setStatus('idle');
         stopTimer();
+
+        // let state flush, then notify container
+        setTimeout(() => setEndedAt(Date.now()), 0);
+      };
+
+      try {
+        rec.start();
+      } catch (e) {
+        setStatus('error');
+        setError(e instanceof Error ? e.message : 'Failed to start mic');
       }
-    };
+    },
+    [RecogCtor, supported, lang, startTimer, stopTimer],
+  );
 
-    rec.onend = () => {
-      if (sessionActiveRef.current && keepAliveRef.current) {
-        try {
-          rec.start();
-        } catch {
-          setTimeout(() => createAndStart(rec.lang), 50);
-        }
-        return;
-      }
-
-      // TRUE end: merge any remaining interim into final before emitting endedAt
-      const merged = (finalRef.current + (interimRef.current ? ' ' + interimRef.current : '')).trim();
-      if (merged !== finalRef.current) {
-        setFinal(merged);
-        finalRef.current = merged;
-      }
-      setInterim('');
-      interimRef.current = '';
-
-      sessionActiveRef.current = false;
-      keepAliveRef.current = false;
-      setStatus('idle');
-      stopTimer();
-
-      // let state flush, then notify container
-      setTimeout(() => setEndedAt(Date.now()), 0);
-    };
-
-    try {
-      rec.start();
-    } catch (e: any) {
-      setStatus('error');
-      setError(e?.message || 'Failed to start mic');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Recog, supported, lang]);
-
-  const start = useCallback((opts?: { keepAlive?: boolean; language?: string }) => {
-    if (!supported) return;
-    sessionActiveRef.current = true;
-    keepAliveRef.current = !!opts?.keepAlive;
-    firstStartRef.current = true;
-    setEndedAt(0);
-    resetTexts();
-    resetTimer();
-    createAndStart(opts?.language);
-  }, [supported, createAndStart]);
+  const start = useCallback(
+    (opts?: { keepAlive?: boolean; language?: string }) => {
+      if (!supported) return;
+      sessionActiveRef.current = true;
+      keepAliveRef.current = !!opts?.keepAlive;
+      firstStartRef.current = true;
+      setEndedAt(0);
+      resetTexts();
+      resetTimer();
+      createAndStart(opts?.language);
+    },
+    [supported, resetTexts, resetTimer, createAndStart],
+  );
 
   const stop = useCallback(() => {
     keepAliveRef.current = false;
     setStatus('finalizing');
-    try { recRef.current?.stop?.(); } catch {}
+    try {
+      recRef.current?.stop?.();
+    } catch (e) {
+      // older Safari can throw if already stopped
+      console.debug('stop() ignored:', e);
+    }
   }, []);
 
   const abort = useCallback(() => {
     keepAliveRef.current = false;
     sessionActiveRef.current = false;
     stopTimer();
-    try { recRef.current?.abort?.(); } catch {}
+    try {
+      recRef.current?.abort?.();
+    } catch (e) {
+      console.debug('abort() ignored:', e);
+    }
     setStatus('idle');
-  }, []);
+  }, [stopTimer]);
 
   const reset = useCallback(() => {
     resetTexts();
@@ -182,12 +243,18 @@ export function useSpeech(lang?: string) {
     setError(null);
     setEndedAt(0);
     setStatus('idle');
-  }, []);
+  }, [resetTexts, resetTimer]);
 
-  useEffect(() => () => {
-    stopTimer();
-    try { recRef.current?.abort?.(); } catch {}
-  }, []);
+  useEffect(() => {
+    return () => {
+      stopTimer();
+      try {
+        recRef.current?.abort?.();
+      } catch (e) {
+        console.debug('cleanup abort ignored:', e);
+      }
+    };
+  }, [stopTimer]);
 
   return {
     supported,
